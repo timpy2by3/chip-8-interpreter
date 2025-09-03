@@ -9,11 +9,8 @@
 // SDL
 #include <SDL3/SDL.h>
 
-// window scale size
-#define SCALE 10
-
 // lookup table for reversing a bit string - useful in draw instruction
-	static const unsigned char reverse_table[256] = {
+	static const uint8_t reverse_table[256] = {
         0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
         0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
         0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
@@ -47,6 +44,20 @@
         0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef,
         0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
     };
+
+// config
+	struct color {
+		uint8_t red;
+		uint8_t green;
+		uint8_t blue;
+		uint8_t alpha;
+	};
+	
+	struct color fg_color;
+	struct color bg_color;
+	
+	uint8_t    SCALE;
+	bool   debug;
 
 // sdl tools
 	SDL_Window*   window   = NULL;
@@ -89,7 +100,7 @@
 	uint8_t sound = 0;
 	
 // fontset - goes into memory at the start
-	unsigned char chip8_fontset[80] =
+	static unsigned char chip8_fontset[80] =
 	{ 
 		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
 		0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -323,7 +334,7 @@ void print_instruction() {
 // HELPER FUNCTIONS FOR EXECUTION
 // slay all.
 void clear_screen(SDL_Renderer* renderer) {
-	SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xff);
+	SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);
 	SDL_RenderClear(renderer);
 }
 
@@ -390,6 +401,7 @@ void execute_instruction() {
 			switch (last_2) {
 				case 0xE0:	// clear screen
 					clear_screen(renderer);
+					SDL_RenderPresent(renderer);
 					break;
 				case 0xEE:	// return
 					if (stack_addr > -1) {
@@ -499,7 +511,11 @@ void execute_instruction() {
 			break;
 		case 0xD:
 			// TODO: use mod here to ensure that sprite is drawn on screen
-			draw_instr(v[second], v[third], fourth);
+			draw_instr(v[second] % 64, v[third] % 32, fourth);
+			
+			// actually draw - do this here to eliminate flickering	
+			SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+			SDL_RenderPresent(renderer);
 			break;
 		case 0xE:
 			switch (last_2) {
@@ -571,13 +587,36 @@ bool handle_input() {
 
 // emulation goes HERE!
 int main(int argc, char** argv) {
-	// argv[1] is rom name
+	// argv -> ['chip-8.exe', rom name, debug, scale, foreground color, background color]
+	if (argc > 2 && argc != 6) {
+		SDL_Log("usage:   ./chip-8.exe  [rom location]    [debug] [scale factor] [foreground color] [background color]");
+		SDL_Log("default: ./chip-8.exe roms/ibm_logo.ch8   false        10            FFFFFFFF           000000FF");
+		SDL_Log("takes:   ./chip-8.exe     string          bool      integer       32-bit integer     32-bit integer");
+		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
+		
+		return -1;
+	} else if (argc == 6){
+		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);
+		debug	 = strcmp("true", argv[2]) == 0 ? true : false;
+		
+		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
+		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
+		
+		printf("fg: %s, bg: %s\npre_fg: %x, pre_bg: %x\n\n", argv[4], argv[5], pre_fg, pre_bg);
+		
+		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
+		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
+	} else {
+		SCALE = 10;
+		debug = false;
+		
+		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
+		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
+	}
+	
 	// set seed for random number gen
 	srand(time(NULL));
-	
-	// print out game to run if present
-	SDL_Log("\nargs count: %d, file: %s", argc, argv[1]);
-	
+		
 	// put fontset into memory
 	copy_fonts();
 	
@@ -617,19 +656,16 @@ int main(int argc, char** argv) {
 		last_3 = (instr & 0x0FFF);
 		
 		// decode instruction
-		// TODO: only if debug flag is on
-		// printf("0x%x: %4x | ", pc, instr);
-		// print_instruction();	
+		if (debug) {
+			printf("0x%x: %4x | ", pc, instr);
+			print_instruction();	
+		}
 		
 		// execute
 		execute_instruction();
 		
 		// handle the input and update running accordingly
 		running = handle_input();
-		
-		//~60 fps	
-		SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
-		SDL_RenderPresent(renderer);
 	}
 	
 	// clean up
