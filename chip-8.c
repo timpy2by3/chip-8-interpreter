@@ -357,14 +357,8 @@ void update_draw_buffer() {
 // TODO: rewrite only the area affected by the sprite
 void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 	v[0xF] = 0;
-	
-	// printf("printing %d rows starting at (%d, %d): ", num_rows, x_coord, y_coord);
-	
 	for (int r = 0; r < num_rows; r++) {
 		uint8_t curr_row = reverse_table[mem[i + r]];
-		
-		// printf("%x, ", curr_row);
-		
 		for (int c = 0; c < 8; c++) {
 			bool screen_pixel = screen[y_coord + r] [x_coord + c];
 			bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
@@ -377,17 +371,17 @@ void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 			screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
 		}
 	}
-	
-	// printf("\n");
-	
-	// for (int r = 0; r < 32; r++) {
-		// for (int c = 0; c < 64; c++) {
-			// printf("%c", screen[r][c] ? '*' : ' ');
-		// }
-		// printf("\n");
-	// }
-	
-	// printf("\n");
+
+	if (debug) {
+		printf("printing %d rows starting at (%d, %d):\n", num_rows, x_coord, y_coord);
+		for (int r = 0; r < 32; r++) {
+			for (int c = 0; c < 64; c++) {
+				printf("%c", screen[r][c] ? '*' : ' ');
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
 	
 	update_draw_buffer();
 }
@@ -616,7 +610,7 @@ int main(int argc, char** argv) {
 	
 	// set seed for random number gen
 	srand(time(NULL));
-		
+
 	// put fontset into memory
 	copy_fonts();
 	
