@@ -57,7 +57,9 @@
 	struct color bg_color;
 	
 	uint8_t    SCALE;
-	bool   debug;
+	bool   	   debug;
+	
+	bool	   draw_flag;
 
 // sdl tools
 	SDL_Window*   window   = NULL;
@@ -382,8 +384,9 @@ void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 		}
 		printf("\n");
 	}
-	
+
 	update_draw_buffer();
+	SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
 }
 
 // EXECUTE STAGE
@@ -395,7 +398,7 @@ void execute_instruction() {
 			switch (last_2) {
 				case 0xE0:	// clear screen
 					clear_screen(renderer);
-					SDL_RenderPresent(renderer);
+					draw_flag = true;
 					break;
 				case 0xEE:	// return
 					if (stack_addr > -1) {
@@ -504,12 +507,8 @@ void execute_instruction() {
 			v[second] = (uint8_t) (rand() % 256) & last_2;
 			break;
 		case 0xD:
-			// TODO: use mod here to ensure that sprite is drawn on screen
 			draw_instr(v[second] % 64, v[third] % 32, fourth);
-			
-			// actually draw - do this here to eliminate flickering	
-			SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
-			SDL_RenderPresent(renderer);
+			draw_flag = true;
 			break;
 		case 0xE:
 			switch (last_2) {
@@ -631,9 +630,14 @@ int main(int argc, char** argv) {
 	// if window and renderer and texture are created and file is valid, then the emulator can run
 	running = true;
 	
-	// clear screen before beginning
+	// clear screen before beginning, then set draw flag to true
 	clear_screen(renderer);
 	SDL_RenderPresent(renderer);
+	
+	// initialize values relevant to the screen update timer
+	uint64_t time_a;
+	uint64_t time_diff;
+	uint64_t time_freq = SDL_GetPerformanceFrequency();
 	
 	// main emulation loop
 	while (running) {		
@@ -655,8 +659,29 @@ int main(int argc, char** argv) {
 			print_instruction();	
 		}
 		
+		// get elapsed time before executing an instruction
+		time_a = SDL_GetPerformanceCounter();
+		
 		// execute
 		execute_instruction();
+		
+		// get time it took to execute the instruction
+		time_diff = (((double) SDL_GetPerformanceCounter() - (double) time_a) * 1000) / ((double) time_freq);
+		
+		// if it was a draw instruction i saw, then wait for the beginning of the next frame
+		// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
+		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
+		if (instr == 0x00E0 || first == 0xD) {
+			SDL_Delay(16.67f - time_diff);
+		}
+
+		// draw only if the draw flag was asserted - might remove this later depending on how i call draw methods
+		if (draw_flag) {
+			// actually draw - do this here to eliminate flickering
+			SDL_RenderPresent(renderer);
+			
+			draw_flag = false;
+		}
 		
 		// handle the input and update running accordingly
 		running = handle_input();
