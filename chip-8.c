@@ -45,6 +45,16 @@
         0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
     };
 
+// keyboard mappings
+// comments correspond to qwerty layout but should work for others
+// thinking about dvorak users (:<
+	static const SDL_Scancode key_scancodes[16] = {
+		30, 31, 32, 33,	// 1, 2, 3, 4
+		20, 26,  8, 21,	// q, w, e, r
+		 4, 22,  7,  9,	// a, s, d, f
+		29, 27,  6, 25, // z, x, c, v
+	};
+
 // config
 	struct color {
 		uint8_t red;
@@ -69,6 +79,7 @@
 	bool screen[32][64] = {0};	// each pixel's value
 
 // emulator state
+// TODO: make into an enum to handle pausing
 	bool running = false;
 	
 // memory - 4kb
@@ -94,7 +105,7 @@
 	uint8_t v[16] = {0};
 
 // stack - holds 12 addresses
-	uint16_t stack[48] = {0};
+	uint16_t stack[48]  = {0};
 	short    stack_addr = -1;
 
 // 8 bit timers - delay, sound
@@ -332,6 +343,25 @@ void print_instruction() {
 	}
 }
 
+// INPUT HANDLING
+// handle all input to the emulator
+int handle_input() {
+	SDL_Event event;
+	SDL_zero(event);
+	
+	while (SDL_PollEvent(&event)) {
+		switch (event.type) {
+			case SDL_EVENT_QUIT:
+				return -1;
+			case SDL_EVENT_KEY_DOWN:
+				return event.key.scancode;
+			default:
+				return 0;
+		}
+	}
+	
+	return 0;
+}
 
 // HELPER FUNCTIONS FOR EXECUTION
 // slay all.
@@ -356,7 +386,7 @@ void update_draw_buffer() {
 // reads num_rows bytes from memory, starting at address i
 // display these rows XOR'd with what's on screen now starting at (start_x, start_y)
 // set v[0xF] to 1 if this erases any pixels on screen, else 0
-// TODO: rewrite only the area affected by the sprite
+// TODO: rewrite only the area affected by the sprite, only draw within the bounds of screen[][]
 void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 	v[0xF] = 0;
 	for (int r = 0; r < num_rows; r++) {
@@ -503,20 +533,21 @@ void execute_instruction() {
 			pc = v[0] + last_3;
 			break;
 		case 0xC:	// vx and random byte
-			SDL_Log("RND v%x, 0x%x", second, last_2);
 			v[second] = (uint8_t) (rand() % 256) & last_2;
 			break;
-		case 0xD:
+		case 0xD:	// draw instruction
 			draw_instr(v[second] % 64, v[third] % 32, fourth);
 			draw_flag = true;
 			break;
-		case 0xE:
+		case 0xE:	// key press instructions
+		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
+		// do to pc what must be done
 			switch (last_2) {
-				case 0x9E:
-					SDL_Log("SKP v%x", second);
+				case 0x9E:	// skip if key pressed
+					pc += (v[second] < 0x10 && (handle_input() == (int) key_scancodes[v[second]])) ? 2 : 0;
 					break;
-				case 0xA1:
-					SDL_Log("SKNP v%x", second);
+				case 0xA1:	// skip if key isn't pressed
+					pc += (v[second] < 0x10 && (handle_input() != (int) key_scancodes[v[second]])) ? 2 : 0;
 					break;
 				default:
 					SDL_Log("undefined - e");
@@ -558,24 +589,6 @@ void execute_instruction() {
 		default:
 			SDL_Log("undefined");
 	}
-}
-
-// INPUT HANDLING
-// handle all input to the emulator
-bool handle_input() {
-	SDL_Event event;
-	SDL_zero(event);
-	
-	while (SDL_PollEvent(&event)) {
-		switch (event.type) {
-			case SDL_EVENT_QUIT:
-				return false;
-			default:
-				return true;
-		}			
-	}
-	
-	return true;
 }
 
 // emulation goes HERE!
@@ -640,7 +653,7 @@ int main(int argc, char** argv) {
 	uint64_t time_freq = SDL_GetPerformanceFrequency();
 	
 	// main emulation loop
-	while (running) {		
+	while (running) {
 		//fetch
 		instr = mem[pc] << 8 | mem[pc + 1];
 		pc += 2;
@@ -684,7 +697,7 @@ int main(int argc, char** argv) {
 		}
 		
 		// handle the input and update running accordingly
-		running = handle_input();
+		running = (handle_input() != -1);
 	}
 	
 	// clean up
