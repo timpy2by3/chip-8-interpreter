@@ -47,13 +47,34 @@
 
 // keyboard mappings
 // comments correspond to qwerty layout but should work for others
-// thinking about dvorak users (:<
 	static const SDL_Scancode key_scancodes[16] = {
 		30, 31, 32, 33,	// 1, 2, 3, 4
 		20, 26,  8, 21,	// q, w, e, r
 		 4, 22,  7,  9,	// a, s, d, f
 		29, 27,  6, 25, // z, x, c, v
 	};
+
+// fontset - goes into memory at the start
+	static const uint8_t chip8_fontset[80] =
+	{ 
+		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+		0x20, 0x60, 0x20, 0x20, 0x70, // 1
+		0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+		0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+		0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+		0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+		0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+		0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+		0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+		0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+		0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+		0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+		0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+		0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+		0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+		0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+	};
+
 
 // config
 	struct color {
@@ -68,8 +89,6 @@
 	
 	uint8_t    SCALE;
 	bool   	   debug;
-	
-	bool	   draw_flag;
 
 // sdl tools
 	SDL_Window*   window   = NULL;
@@ -79,7 +98,7 @@
 	bool screen[32][64] = {0};	// each pixel's value
 
 // emulator state
-// TODO: make into an enum to handle pausing
+// TODO: make into an enum and handle pausing
 	bool running = false;
 	
 // memory - 4kb
@@ -111,27 +130,6 @@
 // 8 bit timers - delay, sound
 	uint8_t delay = 0;
 	uint8_t sound = 0;
-	
-// fontset - goes into memory at the start
-	static unsigned char chip8_fontset[80] =
-	{ 
-		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-		0x20, 0x60, 0x20, 0x20, 0x70, // 1
-		0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-		0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-		0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-		0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-		0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-		0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-		0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-		0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-		0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-		0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-		0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-		0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-		0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-		0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-	};
 
 // HOUSEKEEPING FUNCTIONS
 // copies fontset to memory
@@ -152,7 +150,7 @@ bool open_file(char* name) {
 		printf("no file name given! opening roms/ibm_logo.ch8\n\n");
 		rom = fopen("roms/ibm_logo.ch8", "rb");
 	} else {
-		printf("opening %s\n\n", name);
+		printf("opening %s\n", name);
 		rom = fopen(name, "rb");
 	}
 	
@@ -177,7 +175,7 @@ bool open_file(char* name) {
 		return false;
 	}
 	
-	// read file to memory
+	// read file to memory starting at pc
 	if (fread(&mem[pc], 1, size, rom) != (size_t)size) {
 		SDL_Log("failed to read file to emulator memory");
 		fclose(rom);
@@ -190,7 +188,7 @@ bool open_file(char* name) {
 }
 
 // clean up all of the sdl tools and arrays that have been made
-void end(SDL_Window* window, SDL_Renderer* renderer) {
+void end() {
 	SDL_DestroyWindow(window);
 	SDL_DestroyRenderer(renderer);
 	
@@ -222,7 +220,7 @@ void print_instruction() {
 			SDL_Log("JP %x", last_3);
 			break;
 		case 0x2:
-			SDL_Log("CALL %x", last_3);
+			SDL_Log("CALL 0x%x", last_3);
 			break;
 		case 0x3:
 			SDL_Log("SE v%x, 0x%x", second, last_2);
@@ -365,7 +363,7 @@ int handle_input() {
 
 // HELPER FUNCTIONS FOR EXECUTION
 // slay all.
-void clear_screen(SDL_Renderer* renderer) {
+void clear_screen() {
 	SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);
 	SDL_RenderClear(renderer);
 }
@@ -386,7 +384,7 @@ void update_draw_buffer() {
 // reads num_rows bytes from memory, starting at address i
 // display these rows XOR'd with what's on screen now starting at (start_x, start_y)
 // set v[0xF] to 1 if this erases any pixels on screen, else 0
-// TODO: rewrite only the area affected by the sprite, only draw within the bounds of screen[][]
+// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
 void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 	v[0xF] = 0;
 	for (int r = 0; r < num_rows; r++) {
@@ -400,35 +398,35 @@ void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 				v[0xF] = 1;
 			}
 			
-			screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
-		}
-	}
-
-	if (debug) {
-		printf("printing %d rows starting at (%d, %d):\n", num_rows, x_coord, y_coord);
-		for (int r = 0; r < 32; r++) {
-			for (int c = 0; c < 64; c++) {
-				printf("%c", screen[r][c] ? '*' : ' ');
+			if (y_coord + r <= 32 && x_coord + c <= 64) {
+				screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
 			}
-			printf("\n");
 		}
-		printf("\n");
 	}
-
+	
 	update_draw_buffer();
 	SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
 }
 
+// return the index of the given keycode in key_scancodes
+int keys_index_of(int keycode) {
+	for (int a = 0; a < 0x10; a++) {
+		if ((int) key_scancodes[a] == keycode) {
+			return a;
+		}
+	}
+	
+	return -1;
+}
+
 // EXECUTE STAGE
 // executes an instruction
-// TODO: reduce overlapping code with print_instruction
 void execute_instruction() {
 	switch (first){
 		case 0x0:
 			switch (last_2) {
 				case 0xE0:	// clear screen
-					clear_screen(renderer);
-					draw_flag = true;
+					clear_screen();
 					break;
 				case 0xEE:	// return
 					if (stack_addr > -1) {
@@ -488,34 +486,34 @@ void execute_instruction() {
 					v[second] = v[third];
 					break;
 				case 0x1:	// or
-					v[second] = v[second] | v[third];
+					v[second] |= v[third];
 					break;
 				case 0x2:	// and
-					v[second] = v[second] & v[third];
+					v[second] &= v[third];
 					break;
 				case 0x3:	// xor
-					v[second] = v[second] ^ v[third];
+					v[second] ^= v[third];
 					break;
 				case 0x4:	// add with carry flag in vF
 					uint16_t sum = v[second] + v[third];
-					v[0xF] = (sum > 0xFF) ? 1 : 0;
 					v[second] = (uint8_t) sum;
+					v[0xF] = (sum > 0xFF) ? 1 : 0;
 					break;
 				case 0x5:	// subtract with borrow flag in vF
-					v[0xF] = (v[second] > v[third]) ? 1 : 0;
-					v[second] = v[second] - v[third];
+					v[second] -= v[third];
+					v[0xF] = (v[third] > v[second]) ? 1 : 0;
 					break;				
 				case 0x6:	// shift right with half flag in vF
-					v[0xF] = ((v[second] & 0x01) == 1) ? 1 : 0;
 					v[second] = v[second] >> 1;
+					v[0xF] = ((v[second] & 0x01) == 1) ? 1 : 0;
 					break;
 				case 0x7:	// negated subtraction with borrow flag in vF
-					v[0xF] = (v[third] > v[second]) ? 1 : 0;
 					v[second] = v[third] - v[second];
+					v[0xF] = (v[third] > v[second]) ? 1 : 0;
 					break;
 				case 0xE:	// shift left with overflow flag in vF
+					v[second] = v[second] << 1;
 					v[0xF] = ((v[second] & 0x80) == 0x80) ? 1 : 0;
-					v[second] = v[second] << 1;					
 					break;
 				default:
 					SDL_Log("undefined - 8");
@@ -537,7 +535,6 @@ void execute_instruction() {
 			break;
 		case 0xD:	// draw instruction
 			draw_instr(v[second] % 64, v[third] % 32, fourth);
-			draw_flag = true;
 			break;
 		case 0xE:	// key press instructions
 		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
@@ -555,32 +552,47 @@ void execute_instruction() {
 			break;
 		case 0xF:
 			switch (last_2) {
-				case 0x07:
-					SDL_Log("LD v%x, DT", second);
+				case 0x07:	// load delay register
+					v[second] = delay;
 					break;
-				case 0x0A:
-					SDL_Log("LD v%x, K", second);
+				case 0x0A:	// wait until key press, then store key in v[second]
+					int key_index = keys_index_of(handle_input());
+					
+					if (key_index != -1) {	// if the scancode of the pressed key matches a chip8 key
+						v[second] = key_index;
+					} else {				// else decrement pc by 2 to keep looping until a key is pressed
+						pc -= 2;
+					}
+					
 					break;
-				case 0x15:
-					SDL_Log("LD DT, v%x", second);
+				case 0x15:	// set delay timer to v[second]
+					delay = v[second];
 					break;					
-				case 0x18:
-					SDL_Log("LD ST, v%x", second);
+				case 0x18:	// set sound timer to v[second]
+					sound = v[second];
 					break;
-				case 0x1E:
-					SDL_Log("ADD i, v%x", second);
+				case 0x1E:	// add v[second] to memory index
+					i += v[second];
+					v[0xF] = i > 0xFFF ? 1 : 0;
 					break;
-				case 0x29:
-					SDL_Log("LD F, v%x", second);
+				case 0x29:	// set index to point to character in fonts corresponding to bottom nibble of v[second]
+					//	(bottom nibble)		(number of bytes per character in fontset)
+					i = (v[second] & 0x0F) * 5;
 					break;
-				case 0x33:
-					SDL_Log("LD B, v%x", second);
+				case 0x33:	// convert v[second] to decimal, then store each digit in successive memory indices
+					mem[i] 	   = v[second] / 100 % 10;
+					mem[i + 1] = v[second] / 10  % 10;
+					mem[i + 2] = v[second] /*/1*/% 10;
 					break;
-				case 0x55:
-					SDL_Log("LD [i], v%x", second);
+				case 0x55:	// store registers to memory
+					for (int a = 0; a <= second; a++) {
+						mem[i + a] = v[a];
+					}
 					break;
-				case 0x65:
-					SDL_Log("LD v%x, [i]", second);
+				case 0x65:	// pull memory to registers
+					for (int a = 0; a <= second; a++) {
+						v[a] = mem[i + a];
+					}
 					break;
 				default:
 					SDL_Log("undefined - f");
@@ -602,17 +614,17 @@ int main(int argc, char** argv) {
 		
 		return -1;
 	} else if (argc == 6){
-		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);
-		debug	 = strcmp("true", argv[2]) == 0 ? true : false;
+		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);			// parse an integer scale value
+		debug	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
 		
+		// parse a long long int from the foreground, background colors' args
 		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
 		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
 		
-		printf("fg: %s, bg: %s\npre_fg: %x, pre_bg: %x\n\n", argv[4], argv[5], pre_fg, pre_bg);
-		
+		// bit masking for each of r, g, b, a values for fg and bg colors
 		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
 		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
-	} else {
+	} else {	// default values
 		SCALE = 10;
 		debug = false;
 		
@@ -637,17 +649,14 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 	
-	// tells us where the window/renderer have been initialized in memory
-	SDL_Log("window location:   %p\nrenderer location: %p\n\n", window, renderer);
-	
 	// if window and renderer and texture are created and file is valid, then the emulator can run
 	running = true;
 	
 	// clear screen before beginning, then set draw flag to true
-	clear_screen(renderer);
+	clear_screen();
 	SDL_RenderPresent(renderer);
 	
-	// initialize values relevant to the screen update timer
+	// initialize values to help with screen updates timer
 	uint64_t time_a;
 	uint64_t time_diff;
 	uint64_t time_freq = SDL_GetPerformanceFrequency();
@@ -656,8 +665,11 @@ int main(int argc, char** argv) {
 	while (running) {
 		//fetch
 		instr = mem[pc] << 8 | mem[pc + 1];
+
+		// increment pc since we already have current instruction
 		pc += 2;
 		
+		// execute!
 		// mask the digits we need in the opcode
 		first  = (instr & 0xF000) >> 12;
 		second = (instr & 0x0F00) >> 8;
@@ -665,12 +677,6 @@ int main(int argc, char** argv) {
 		fourth = (instr & 0X000F);
 		last_2 = (instr & 0x00FF);
 		last_3 = (instr & 0x0FFF);
-		
-		// decode instruction
-		if (debug) {
-			printf("0x%x: %4x | ", pc, instr);
-			print_instruction();	
-		}
 		
 		// get elapsed time before executing an instruction
 		time_a = SDL_GetPerformanceCounter();
@@ -686,14 +692,7 @@ int main(int argc, char** argv) {
 		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
 		if (instr == 0x00E0 || first == 0xD) {
 			SDL_Delay(16.67f - time_diff);
-		}
-
-		// draw only if the draw flag was asserted - might remove this later depending on how i call draw methods
-		if (draw_flag) {
-			// actually draw - do this here to eliminate flickering
 			SDL_RenderPresent(renderer);
-			
-			draw_flag = false;
 		}
 		
 		// handle the input and update running accordingly
@@ -701,7 +700,7 @@ int main(int argc, char** argv) {
 	}
 	
 	// clean up
-	end(window, renderer);
+	end();
 	
 	// end
 	return 0;
