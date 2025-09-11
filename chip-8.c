@@ -499,21 +499,25 @@ void execute_instruction() {
 					v[second] = (uint8_t) sum;
 					v[0xF] = (sum > 0xFF) ? 1 : 0;
 					break;
-				case 0x5:	// subtract with borrow flag in vF
+				case 0x5:	// subtract with !(borrow) flag in vF
+					bool borrow_5 = v[second] < v[third];
 					v[second] -= v[third];
-					v[0xF] = (v[third] > v[second]) ? 1 : 0;
+					v[0xF] = !borrow_5 ? 1 : 0;
 					break;				
 				case 0x6:	// shift right with half flag in vF
+					bool half_6 = ((v[second] & 0x01) == 1);
 					v[second] = v[second] >> 1;
-					v[0xF] = ((v[second] & 0x01) == 1) ? 1 : 0;
+					v[0xF] = half_6 ? 1 : 0;
 					break;
-				case 0x7:	// negated subtraction with borrow flag in vF
+				case 0x7:	// negated subtraction with !(borrow) flag in vF
+					bool borrow_7 = v[third] < v[second];
 					v[second] = v[third] - v[second];
-					v[0xF] = (v[third] > v[second]) ? 1 : 0;
+					v[0xF] = !borrow_7 ? 1 : 0;
 					break;
 				case 0xE:	// shift left with overflow flag in vF
+					bool overflow_e = ((v[second] & 0x80) == 0x80);
 					v[second] = v[second] << 1;
-					v[0xF] = ((v[second] & 0x80) == 0x80) ? 1 : 0;
+					v[0xF] = overflow_e ? 1 : 0;
 					break;
 				default:
 					SDL_Log("undefined - 8");
