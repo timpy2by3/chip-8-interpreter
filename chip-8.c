@@ -45,15 +45,6 @@
         0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
     };
 
-// keyboard mappings
-// comments correspond to qwerty layout but should work for others
-	static const SDL_Scancode key_scancodes[16] = {
-		30, 31, 32, 33,	// 1, 2, 3, 4
-		20, 26,  8, 21,	// q, w, e, r
-		 4, 22,  7,  9,	// a, s, d, f
-		29, 27,  6, 25, // z, x, c, v
-	};
-
 // fontset - goes into memory at the start
 	static const uint8_t chip8_fontset[80] =
 	{ 
@@ -75,7 +66,6 @@
 		0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 	};
 
-
 // config
 	struct color {
 		uint8_t red;
@@ -90,17 +80,20 @@
 	uint8_t    SCALE;
 	bool   	   debug;
 
+// emulator state
+// TODO: make into an enum and handle pausing
+	bool running = false;
+
 // sdl tools
 	SDL_Window*   window   = NULL;
 	SDL_Renderer* renderer = NULL;
 
 // array for display
 	bool screen[32][64] = {0};	// each pixel's value
-
-// emulator state
-// TODO: make into an enum and handle pausing
-	bool running = false;
 	
+// array for keypad inputs
+	bool keypad[16];			// whether this key is pressed now
+
 // memory - 4kb
 	uint8_t mem[4096] = {0};
 	
@@ -132,6 +125,34 @@
 	uint8_t sound = 0;
 
 // HOUSEKEEPING FUNCTIONS
+// sets all of the default config values using args passed when executable is run
+void set_config(int argc, char** argv) {
+	// argv -> ['chip-8.exe', rom name, debug, scale, foreground color, background color]
+	if (argc > 2 && argc != 6) {
+		SDL_Log("usage:   ./chip-8.exe  [rom location]    [debug] [scale factor] [foreground color] [background color]");
+		SDL_Log("default: ./chip-8.exe roms/ibm_logo.ch8   false        10            FFFFFFFF           000000FF");
+		SDL_Log("takes:   ./chip-8.exe     string          bool      integer       32-bit integer     32-bit integer");
+		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
+	} else if (argc == 6){
+		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);			// parse an integer scale value
+		debug	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
+		
+		// parse a long long int from the foreground, background colors' args
+		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
+		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
+		
+		// bit masking for each of r, g, b, a values for fg and bg colors
+		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
+		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
+	} else {	// default values
+		SCALE = 10;
+		debug = false;
+		
+		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
+		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
+	}
+}
+
 // copies fontset to memory
 void copy_fonts() {
 	// 80 is the size of the fontset
@@ -343,22 +364,66 @@ void print_instruction() {
 
 // INPUT HANDLING
 // handle all input to the emulator
-int handle_input() {
+// TODO: more elegant way of setting key values (although not really necessary; this is probably the fastest implementation)
+bool handle_input() {
 	SDL_Event event;
 	SDL_zero(event);
 	
 	while (SDL_PollEvent(&event)) {
 		switch (event.type) {
-			case SDL_EVENT_QUIT:
-				return -1;
-			case SDL_EVENT_KEY_DOWN:
-				return event.key.scancode;
-			default:
-				return 0;
+			case SDL_EVENT_QUIT:		// if we want to quit the program, return false
+				return false;
+			
+			case SDL_EVENT_KEY_DOWN:	// if a key is pressed, set its corresponding bool to true
+				switch(event.key.scancode){
+					case 30:	keypad[0x0] = true; break;
+					case 31:	keypad[0x1] = true; break;
+					case 32:	keypad[0x2] = true; break;
+					case 33:	keypad[0x3] = true; break;
+					case 20:	keypad[0x4] = true; break;
+					case 26:	keypad[0x5] = true; break;
+					case  8:	keypad[0x6] = true; break;
+					case 21:	keypad[0x7] = true; break;
+					case  4:	keypad[0x8] = true; break;
+					case 22:	keypad[0x9] = true; break;
+					case  7:	keypad[0xA] = true; break;
+					case  9:	keypad[0xB] = true; break;
+					case 29:	keypad[0xC] = true; break;
+					case 27:	keypad[0xD] = true; break;
+					case  6:	keypad[0xE] = true; break;
+					case 25:	keypad[0xF] = true; break;
+					default:	break;
+				}
+				break;
+			
+			case SDL_EVENT_KEY_UP:		// if a key is released, set its corresponding bool to false
+				switch(event.key.scancode){
+					case 30:	keypad[0x0] = false; break;
+					case 31:	keypad[0x1] = false; break;
+					case 32:	keypad[0x2] = false; break;
+					case 33:	keypad[0x3] = false; break;
+					case 20:	keypad[0x4] = false; break;
+					case 26:	keypad[0x5] = false; break;
+					case  8:	keypad[0x6] = false; break;
+					case 21:	keypad[0x7] = false; break;
+					case  4:	keypad[0x8] = false; break;
+					case 22:	keypad[0x9] = false; break;
+					case  7:	keypad[0xA] = false; break;
+					case  9:	keypad[0xB] = false; break;
+					case 29:	keypad[0xC] = false; break;
+					case 27:	keypad[0xD] = false; break;
+					case  6:	keypad[0xE] = false; break;
+					case 25:	keypad[0xF] = false; break;
+					default:	break;
+				}
+				break;
+			
+			default: break;
 		}
 	}
 	
-	return 0;
+	// if we have no reason to stop the program, continue running
+	return true;
 }
 
 // HELPER FUNCTIONS FOR EXECUTION
@@ -406,17 +471,6 @@ void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
 	
 	update_draw_buffer();
 	SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
-}
-
-// return the index of the given keycode in key_scancodes
-int keys_index_of(int keycode) {
-	for (int a = 0; a < 0x10; a++) {
-		if ((int) key_scancodes[a] == keycode) {
-			return a;
-		}
-	}
-	
-	return -1;
 }
 
 // EXECUTE STAGE
@@ -544,11 +598,11 @@ void execute_instruction() {
 		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
 		// do to pc what must be done
 			switch (last_2) {
-				case 0x9E:	// skip if key pressed
-					pc += (v[second] < 0x10 && (handle_input() == (int) key_scancodes[v[second]])) ? 2 : 0;
+				case 0x9E:	// skip next if key pressed
+					pc += keypad[v[second]] ? 2 : 0;
 					break;
-				case 0xA1:	// skip if key isn't pressed
-					pc += (v[second] < 0x10 && (handle_input() != (int) key_scancodes[v[second]])) ? 2 : 0;
+				case 0xA1:	// skip next if key isn't pressed
+					pc += keypad[v[second]] ? 0 : 2;
 					break;
 				default:
 					SDL_Log("undefined - e");
@@ -560,13 +614,6 @@ void execute_instruction() {
 					v[second] = delay;
 					break;
 				case 0x0A:	// wait until key press, then store key in v[second]
-					int key_index = keys_index_of(handle_input());
-					
-					if (key_index != -1) {	// if the scancode of the pressed key matches a chip8 key
-						v[second] = key_index;
-					} else {				// else decrement pc by 2 to keep looping until a key is pressed
-						pc -= 2;
-					}
 					
 					break;
 				case 0x15:	// set delay timer to v[second]
@@ -609,32 +656,7 @@ void execute_instruction() {
 
 // emulation goes HERE!
 int main(int argc, char** argv) {
-	// argv -> ['chip-8.exe', rom name, debug, scale, foreground color, background color]
-	if (argc > 2 && argc != 6) {
-		SDL_Log("usage:   ./chip-8.exe  [rom location]    [debug] [scale factor] [foreground color] [background color]");
-		SDL_Log("default: ./chip-8.exe roms/ibm_logo.ch8   false        10            FFFFFFFF           000000FF");
-		SDL_Log("takes:   ./chip-8.exe     string          bool      integer       32-bit integer     32-bit integer");
-		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
-		
-		return -1;
-	} else if (argc == 6){
-		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);			// parse an integer scale value
-		debug	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
-		
-		// parse a long long int from the foreground, background colors' args
-		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
-		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
-		
-		// bit masking for each of r, g, b, a values for fg and bg colors
-		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
-		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
-	} else {	// default values
-		SCALE = 10;
-		debug = false;
-		
-		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
-		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
-	}
+	set_config(argc, argv);
 	
 	// set seed for random number gen
 	srand(time(NULL));
@@ -700,7 +722,7 @@ int main(int argc, char** argv) {
 		}
 		
 		// handle the input and update running accordingly
-		running = (handle_input() != -1);
+		running = (handle_input());
 	}
 	
 	// clean up
