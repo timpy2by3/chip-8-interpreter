@@ -89,13 +89,13 @@
 	SDL_Renderer* renderer = NULL;
 
 // array for display
-	bool screen[32][64] = {0};	// each pixel's value
+	bool screen[32][64];	// each pixel's value
 	
 // array for keypad inputs
-	bool keypad[16];			// whether this key is pressed now
+	bool keypad[16];		// whether this key is pressed now
 
 // memory - 4kb
-	uint8_t mem[4096] = {0};
+	uint8_t mem[4096];
 	
 // size of the rom
 	long size = 0;
@@ -117,7 +117,7 @@
 	uint8_t v[16] = {0};
 
 // stack - holds 12 addresses
-	uint16_t stack[48]  = {0};
+	uint16_t stack[12]  = {0};
 	short    stack_addr = -1;
 
 // 8 bit timers - delay, sound
@@ -377,27 +377,26 @@ void clear_screen() {
 // display these rows XOR'd with what's on screen now starting at (start_x, start_y)
 // set v[0xF] to 1 if this erases any pixels on screen, else 0
 // TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
-void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
-	v[0xF] = 0;
+void draw_instr(uint8_t x_in, uint8_t y_in, uint8_t num_rows) {
+	uint8_t x_coord = x_in % 64;
+	uint8_t y_coord = y_in % 32;
 	
 	// iterate through rows
 	for (int r = 0; r < num_rows; r++) {
-		if (r + 1 < 32) {	// logic to check we're not drawing out of bounds vertically
+		if (r < 32) {	// logic to check we're not drawing out of bounds vertically
 			// for some reason bytes are stored in reverse bit order, so reverse the bits
 			uint8_t curr_row = reverse_table[mem[i + r]];
 			// iterate through columns
 			for (int c = 0; c < 8; c++) {
-				if (c + 1 < 64) {	// logic to check we're not drawing out of bounds horizontally
+				if (c < 64) {	// logic to check we're not drawing out of bounds horizontally
 					bool screen_pixel = screen[y_coord + r] [x_coord + c];
 					bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
 					
-					// logic to check if pixel is erased and whether to update v[0xF]
-					if (screen_pixel == true && row_pixel == true) {
-						v[0xF] = 1;
-					}
+					// update pixel erasure flag
+					v[0xF] = (screen_pixel && row_pixel) ? 1 : 0;
 					
 					// xor the current pixel onto the screen
-					screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
+					screen[(y_coord + r)] [(x_coord + c)] = screen_pixel ^ row_pixel;
 				}
 			}
 		}
@@ -555,12 +554,15 @@ void execute_instruction() {
 					break;
 				case 0x1:	// or
 					v[second] |= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x2:	// and
 					v[second] &= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x3:	// xor
 					v[second] ^= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x4:	// add with carry flag in vF
 					uint16_t sum = v[second] + v[third];
@@ -573,8 +575,8 @@ void execute_instruction() {
 					v[0xF] = !borrow_5 ? 1 : 0;
 					break;				
 				case 0x6:	// shift right with half flag in vF
-					bool half_6 = ((v[second] & 0x01) == 1);
-					v[second] = v[second] >> 1;
+					bool half_6 = ((v[third] & 0x01) == 1);
+					v[second] = v[third] >> 1;
 					v[0xF] = half_6 ? 1 : 0;
 					break;
 				case 0x7:	// negated subtraction with !(borrow) flag in vF
@@ -583,8 +585,8 @@ void execute_instruction() {
 					v[0xF] = !borrow_7 ? 1 : 0;
 					break;
 				case 0xE:	// shift left with overflow flag in vF
-					bool overflow_e = ((v[second] & 0x80) == 0x80);
-					v[second] = v[second] << 1;
+					bool overflow_e = ((v[third] & 0x80) == 0x80);
+					v[second] = v[third] << 1;
 					v[0xF] = overflow_e ? 1 : 0;
 					break;
 				default:
@@ -606,7 +608,7 @@ void execute_instruction() {
 			v[second] = (uint8_t) (rand() % 256) & last_2;
 			break;
 		case 0xD:	// draw instruction
-			draw_instr(v[second] % 64, v[third] % 32, fourth);
+			draw_instr(v[second], v[third], fourth);
 			break;
 		case 0xE:	// key press instructions
 		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
@@ -631,20 +633,13 @@ void execute_instruction() {
 					// this is the key we'll put inside the given register.
 					uint8_t key = 0xFF;
 					
-					// wait until a key is pressed
 					for (int a = 0; a < 0x10; a++) {
 						if (keypad[a]) {
 							key = a;
-							break;
 						}
 					}
 					
-					// wait until the key is released to add it to the register
-					if (!keypad[key] && key != 0xFF) {
-						v[second] = key;
-					} else {	// decrement pc if the key is not pressed
-						pc -= 2;
-					}
+					pc -= (key == 0xFF) ? 2 : 0;
 					
 					break;
 				case 0x15:	// set delay timer to v[second]
@@ -666,15 +661,17 @@ void execute_instruction() {
 					mem[i + 1] = v[second] / 10  % 10;
 					mem[i + 2] = v[second] /*/1*/% 10;
 					break;
-				case 0x55:	// store registers to memory
+				case 0x55:	// store registers to memory, then increment mem index accordingly
 					for (int a = 0; a <= second; a++) {
 						mem[i + a] = v[a];
 					}
+					i += second + 1;					
 					break;
-				case 0x65:	// pull memory to registers
+				case 0x65:	// pull memory to registers, then increment mem index accordingly
 					for (int a = 0; a <= second; a++) {
 						v[a] = mem[i + a];
 					}
+					i += second + 1;
 					break;
 				default:
 					SDL_Log("undefined - f");
@@ -687,6 +684,7 @@ void execute_instruction() {
 
 // emulation goes HERE!
 int main(int argc, char** argv) {
+	// read the user config and use it
 	set_config(argc, argv);
 	
 	// set seed for random number gen
@@ -714,7 +712,7 @@ int main(int argc, char** argv) {
 	update_draw_buffer();
 	SDL_RenderPresent(renderer);
 	
-	// initialize values to help with screen updates timer
+	// initialize values to help with screen updates
 	uint64_t time_a;
 	uint64_t time_diff;
 	uint64_t time_freq = SDL_GetPerformanceFrequency();
@@ -752,6 +750,12 @@ int main(int argc, char** argv) {
 			SDL_Delay(16.67f - time_diff);
 			update_draw_buffer();
 			SDL_RenderPresent(renderer);
+			
+			// decrement delay and sound timers
+			// this is super janky but i expect at least one draw command every 1/60 sec
+			// so should be fine?
+			delay -= delay > 0 ? 1 : 0;
+			sound -= sound > 0 ? 1 : 0;
 		}
 		
 		// handle the input and update running accordingly
