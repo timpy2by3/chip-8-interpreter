@@ -362,6 +362,67 @@ void print_instruction() {
 	}
 }
 
+// HELPER FUNCTIONS FOR EXECUTION
+// slay all.
+void clear_screen() {
+	// set all values in screen[][] to false
+	for (int r = 0; r < 32; r++) {
+		for (int c = 0; c < 64; c++) {
+			screen[r][c] = false;
+		}
+	}
+}
+
+// reads num_rows bytes from memory, starting at address i
+// display these rows XOR'd with what's on screen now starting at (start_x, start_y)
+// set v[0xF] to 1 if this erases any pixels on screen, else 0
+// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
+void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
+	v[0xF] = 0;
+	
+	// iterate through rows
+	for (int r = 0; r < num_rows; r++) {
+		if (r + 1 < 32) {	// logic to check we're not drawing out of bounds vertically
+			// for some reason bytes are stored in reverse bit order, so reverse the bits
+			uint8_t curr_row = reverse_table[mem[i + r]];
+			// iterate through columns
+			for (int c = 0; c < 8; c++) {
+				if (c + 1 < 64) {	// logic to check we're not drawing out of bounds horizontally
+					bool screen_pixel = screen[y_coord + r] [x_coord + c];
+					bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
+					
+					// logic to check if pixel is erased and whether to update v[0xF]
+					if (screen_pixel == true && row_pixel == true) {
+						v[0xF] = 1;
+					}
+					
+					// xor the current pixel onto the screen
+					screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
+				}
+			}
+		}
+	}
+}
+
+// turns the bool array in screen[][] to rectangles to be rendered in the window
+void update_draw_buffer() {
+	// make a rectangle at every pixel in screen[][] (set color as needed) then send it to the renderer
+	for (int r = 0; r < 32; r++) {
+		for (int c = 0; c < 64; c++) {
+			if (screen[r][c]) {
+				// set draw color to foreground color
+				SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+			} else {
+				// set draw color to background color
+				SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);	
+			}
+			
+			SDL_FRect pixel = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
+			SDL_RenderFillRect(renderer, &pixel);
+		}
+	}
+}
+
 // INPUT HANDLING
 // handle all input to the emulator
 // TODO: more elegant way of setting key values (although not really necessary; this is probably the fastest implementation)
@@ -376,21 +437,21 @@ bool handle_input() {
 			
 			case SDL_EVENT_KEY_DOWN:	// if a key is pressed, set its corresponding bool to true
 				switch(event.key.scancode){
-					case 30:	keypad[0x0] = true; break;
-					case 31:	keypad[0x1] = true; break;
-					case 32:	keypad[0x2] = true; break;
-					case 33:	keypad[0x3] = true; break;
+					case 30:	keypad[0x1] = true; break;
+					case 31:	keypad[0x2] = true; break;
+					case 32:	keypad[0x3] = true; break;
+					case 33:	keypad[0xC] = true; break;
 					case 20:	keypad[0x4] = true; break;
 					case 26:	keypad[0x5] = true; break;
 					case  8:	keypad[0x6] = true; break;
-					case 21:	keypad[0x7] = true; break;
-					case  4:	keypad[0x8] = true; break;
-					case 22:	keypad[0x9] = true; break;
-					case  7:	keypad[0xA] = true; break;
-					case  9:	keypad[0xB] = true; break;
-					case 29:	keypad[0xC] = true; break;
-					case 27:	keypad[0xD] = true; break;
-					case  6:	keypad[0xE] = true; break;
+					case 21:	keypad[0xD] = true; break;
+					case  4:	keypad[0x7] = true; break;
+					case 22:	keypad[0x8] = true; break;
+					case  7:	keypad[0x9] = true; break;
+					case  9:	keypad[0xE] = true; break;
+					case 29:	keypad[0xA] = true; break;
+					case 27:	keypad[0x0] = true; break;
+					case  6:	keypad[0xB] = true; break;
 					case 25:	keypad[0xF] = true; break;
 					default:	break;
 				}
@@ -398,21 +459,21 @@ bool handle_input() {
 			
 			case SDL_EVENT_KEY_UP:		// if a key is released, set its corresponding bool to false
 				switch(event.key.scancode){
-					case 30:	keypad[0x0] = false; break;
-					case 31:	keypad[0x1] = false; break;
-					case 32:	keypad[0x2] = false; break;
-					case 33:	keypad[0x3] = false; break;
+					case 30:	keypad[0x1] = false; break;
+					case 31:	keypad[0x2] = false; break;
+					case 32:	keypad[0x3] = false; break;
+					case 33:	keypad[0xC] = false; break;
 					case 20:	keypad[0x4] = false; break;
 					case 26:	keypad[0x5] = false; break;
 					case  8:	keypad[0x6] = false; break;
-					case 21:	keypad[0x7] = false; break;
-					case  4:	keypad[0x8] = false; break;
-					case 22:	keypad[0x9] = false; break;
-					case  7:	keypad[0xA] = false; break;
-					case  9:	keypad[0xB] = false; break;
-					case 29:	keypad[0xC] = false; break;
-					case 27:	keypad[0xD] = false; break;
-					case  6:	keypad[0xE] = false; break;
+					case 21:	keypad[0xD] = false; break;
+					case  4:	keypad[0x7] = false; break;
+					case 22:	keypad[0x8] = false; break;
+					case  7:	keypad[0x9] = false; break;
+					case  9:	keypad[0xE] = false; break;
+					case 29:	keypad[0xA] = false; break;
+					case 27:	keypad[0x0] = false; break;
+					case  6:	keypad[0xB] = false; break;
 					case 25:	keypad[0xF] = false; break;
 					default:	break;
 				}
@@ -424,53 +485,6 @@ bool handle_input() {
 	
 	// if we have no reason to stop the program, continue running
 	return true;
-}
-
-// HELPER FUNCTIONS FOR EXECUTION
-// slay all.
-void clear_screen() {
-	SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);
-	SDL_RenderClear(renderer);
-}
-
-// turns the bool array in screen[][] to rectangles to be rendered in the window
-void update_draw_buffer() {
-	// make a bunch of rectangles
-	for (int r = 0; r < 32; r++) {
-		for (int c = 0; c < 64; c++) {
-			if (screen[r][c]) {
-				SDL_FRect tester = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
-				SDL_RenderFillRect(renderer, &tester);
-			}
-		}
-	}
-}
-
-// reads num_rows bytes from memory, starting at address i
-// display these rows XOR'd with what's on screen now starting at (start_x, start_y)
-// set v[0xF] to 1 if this erases any pixels on screen, else 0
-// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
-void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
-	v[0xF] = 0;
-	for (int r = 0; r < num_rows; r++) {
-		uint8_t curr_row = reverse_table[mem[i + r]];
-		for (int c = 0; c < 8; c++) {
-			bool screen_pixel = screen[y_coord + r] [x_coord + c];
-			bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
-			
-			// logic to check if pixel is erased and whether to update v[0xF]
-			if (v[0xF] == 0 && screen_pixel == true && row_pixel == true) {
-				v[0xF] = 1;
-			}
-			
-			if (y_coord + r <= 32 && x_coord + c <= 64) {
-				screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
-			}
-		}
-	}
-	
-	update_draw_buffer();
-	SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
 }
 
 // EXECUTE STAGE
@@ -614,6 +628,23 @@ void execute_instruction() {
 					v[second] = delay;
 					break;
 				case 0x0A:	// wait until key press, then store key in v[second]
+					// this is the key we'll put inside the given register.
+					uint8_t key = 0xFF;
+					
+					// wait until a key is pressed
+					for (int a = 0; a < 0x10; a++) {
+						if (keypad[a]) {
+							key = a;
+							break;
+						}
+					}
+					
+					// wait until the key is released to add it to the register
+					if (!keypad[key] && key != 0xFF) {
+						v[second] = key;
+					} else {	// decrement pc if the key is not pressed
+						pc -= 2;
+					}
 					
 					break;
 				case 0x15:	// set delay timer to v[second]
@@ -680,6 +711,7 @@ int main(int argc, char** argv) {
 	
 	// clear screen before beginning, then set draw flag to true
 	clear_screen();
+	update_draw_buffer();
 	SDL_RenderPresent(renderer);
 	
 	// initialize values to help with screen updates timer
@@ -718,6 +750,7 @@ int main(int argc, char** argv) {
 		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
 		if (instr == 0x00E0 || first == 0xD) {
 			SDL_Delay(16.67f - time_diff);
+			update_draw_buffer();
 			SDL_RenderPresent(renderer);
 		}
 		
