@@ -1,5 +1,3 @@
-// TODO: more elegant way of showing/hiding debug output
-
 // C LIBRARIES
 #include <time.h>
 #include <stdio.h>
@@ -45,6 +43,27 @@
         0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
     };
 
+// fontset - goes into memory at the start
+	static const uint8_t chip8_fontset[80] =
+	{ 
+		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+		0x20, 0x60, 0x20, 0x20, 0x70, // 1
+		0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+		0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+		0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+		0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+		0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+		0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+		0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+		0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+		0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+		0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+		0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+		0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+		0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+		0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+	};
+
 // config
 	struct color {
 		uint8_t red;
@@ -58,21 +77,23 @@
 	
 	uint8_t    SCALE;
 	bool   	   debug;
-	
-	bool	   draw_flag;
+
+// emulator state
+// TODO: make into an enum and handle pausing
+	bool running = false;
 
 // sdl tools
 	SDL_Window*   window   = NULL;
 	SDL_Renderer* renderer = NULL;
 
 // array for display
-	bool screen[32][64] = {0};	// each pixel's value
-
-// emulator state
-	bool running = false;
+	bool screen[32][64];	// each pixel's value
 	
+// array for keypad inputs
+	bool keypad[16];		// whether this key is pressed now
+
 // memory - 4kb
-	uint8_t mem[4096] = {0};
+	uint8_t mem[4096];
 	
 // size of the rom
 	long size = 0;
@@ -94,35 +115,42 @@
 	uint8_t v[16] = {0};
 
 // stack - holds 12 addresses
-	uint16_t stack[48] = {0};
+	uint16_t stack[12]  = {0};
 	short    stack_addr = -1;
 
 // 8 bit timers - delay, sound
 	uint8_t delay = 0;
 	uint8_t sound = 0;
-	
-// fontset - goes into memory at the start
-	static unsigned char chip8_fontset[80] =
-	{ 
-		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-		0x20, 0x60, 0x20, 0x20, 0x70, // 1
-		0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-		0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-		0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-		0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-		0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-		0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-		0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-		0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-		0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-		0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-		0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-		0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-		0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-		0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-	};
 
 // HOUSEKEEPING FUNCTIONS
+// sets all of the default config values using args passed when executable is run
+void set_config(int argc, char** argv) {
+	// argv -> ['chip-8.exe', rom name, debug, scale, foreground color, background color]
+	if (argc > 2 && argc != 6) {
+		SDL_Log("usage:   ./chip-8.exe  [rom location]    [debug] [scale factor] [foreground color] [background color]");
+		SDL_Log("default: ./chip-8.exe roms/ibm_logo.ch8   false        10            FFFFFFFF           000000FF");
+		SDL_Log("takes:   ./chip-8.exe     string          bool      integer       32-bit integer     32-bit integer");
+		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
+	} else if (argc == 6){
+		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);			// parse an integer scale value
+		debug	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
+		
+		// parse a long long int from the foreground, background colors' args
+		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
+		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
+		
+		// bit masking for each of r, g, b, a values for fg and bg colors
+		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
+		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
+	} else {	// default values
+		SCALE = 10;
+		debug = false;
+		
+		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
+		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
+	}
+}
+
 // copies fontset to memory
 void copy_fonts() {
 	// 80 is the size of the fontset
@@ -141,7 +169,7 @@ bool open_file(char* name) {
 		printf("no file name given! opening roms/ibm_logo.ch8\n\n");
 		rom = fopen("roms/ibm_logo.ch8", "rb");
 	} else {
-		printf("opening %s\n\n", name);
+		printf("opening %s\n", name);
 		rom = fopen(name, "rb");
 	}
 	
@@ -166,7 +194,7 @@ bool open_file(char* name) {
 		return false;
 	}
 	
-	// read file to memory
+	// read file to memory starting at pc
 	if (fread(&mem[pc], 1, size, rom) != (size_t)size) {
 		SDL_Log("failed to read file to emulator memory");
 		fclose(rom);
@@ -178,8 +206,14 @@ bool open_file(char* name) {
 	return true;
 }
 
+// decrements both timers
+void decrement_timers() {
+	delay -= delay > 0 ? 1 : 0;
+	sound -= sound > 0 ? 1 : 0;
+}
+
 // clean up all of the sdl tools and arrays that have been made
-void end(SDL_Window* window, SDL_Renderer* renderer) {
+void end() {
 	SDL_DestroyWindow(window);
 	SDL_DestroyRenderer(renderer);
 	
@@ -191,7 +225,7 @@ void end(SDL_Window* window, SDL_Renderer* renderer) {
 	SDL_Quit();
 }
 
-// DECODE STAGE
+// DECODE STAGE - disassembler
 // turns the binary code to human-readable assembly
 void print_instruction() {	
 	switch (first){
@@ -211,7 +245,7 @@ void print_instruction() {
 			SDL_Log("JP %x", last_3);
 			break;
 		case 0x2:
-			SDL_Log("CALL %x", last_3);
+			SDL_Log("CALL 0x%x", last_3);
 			break;
 		case 0x3:
 			SDL_Log("SE v%x, 0x%x", second, last_2);
@@ -332,23 +366,77 @@ void print_instruction() {
 	}
 }
 
+// INPUT HANDLING
+// handle all input to the emulator
+// TODO: more elegant way of setting key values (although not really necessary; this is probably the fastest implementation)
+bool handle_input() {
+	SDL_Event event;
+	SDL_zero(event);
+	
+	while (SDL_PollEvent(&event)) {
+		switch (event.type) {
+			case SDL_EVENT_QUIT:		// if we want to quit the program, return false
+				return false;
+			
+			case SDL_EVENT_KEY_DOWN:	// if a key is pressed, set its corresponding bool to true
+				switch(event.key.scancode){
+					case 30:	keypad[0x1] = true; break;
+					case 31:	keypad[0x2] = true; break;
+					case 32:	keypad[0x3] = true; break;
+					case 33:	keypad[0xC] = true; break;
+					case 20:	keypad[0x4] = true; break;
+					case 26:	keypad[0x5] = true; break;
+					case  8:	keypad[0x6] = true; break;
+					case 21:	keypad[0xD] = true; break;
+					case  4:	keypad[0x7] = true; break;
+					case 22:	keypad[0x8] = true; break;
+					case  7:	keypad[0x9] = true; break;
+					case  9:	keypad[0xE] = true; break;
+					case 29:	keypad[0xA] = true; break;
+					case 27:	keypad[0x0] = true; break;
+					case  6:	keypad[0xB] = true; break;
+					case 25:	keypad[0xF] = true; break;
+					default:	break;
+				}
+				break;
+			
+			case SDL_EVENT_KEY_UP:		// if a key is released, set its corresponding bool to false
+				switch(event.key.scancode){
+					case 30:	keypad[0x1] = false; break;
+					case 31:	keypad[0x2] = false; break;
+					case 32:	keypad[0x3] = false; break;
+					case 33:	keypad[0xC] = false; break;
+					case 20:	keypad[0x4] = false; break;
+					case 26:	keypad[0x5] = false; break;
+					case  8:	keypad[0x6] = false; break;
+					case 21:	keypad[0xD] = false; break;
+					case  4:	keypad[0x7] = false; break;
+					case 22:	keypad[0x8] = false; break;
+					case  7:	keypad[0x9] = false; break;
+					case  9:	keypad[0xE] = false; break;
+					case 29:	keypad[0xA] = false; break;
+					case 27:	keypad[0x0] = false; break;
+					case  6:	keypad[0xB] = false; break;
+					case 25:	keypad[0xF] = false; break;
+					default:	break;
+				}
+				break;
+			
+			default: break;
+		}
+	}
+	
+	// if we have no reason to stop the program, continue running
+	return true;
+}
 
 // HELPER FUNCTIONS FOR EXECUTION
 // slay all.
-void clear_screen(SDL_Renderer* renderer) {
-	SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);
-	SDL_RenderClear(renderer);
-}
-
-// turns the bool array in screen[][] to rectangles to be rendered in the window
-void update_draw_buffer() {
-	// make a bunch of rectangles
+void clear_screen() {
+	// set all values in screen[][] to false
 	for (int r = 0; r < 32; r++) {
 		for (int c = 0; c < 64; c++) {
-			if (screen[r][c]) {
-				SDL_FRect tester = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
-				SDL_RenderFillRect(renderer, &tester);
-			}
+			screen[r][c] = false;
 		}
 	}
 }
@@ -356,49 +444,82 @@ void update_draw_buffer() {
 // reads num_rows bytes from memory, starting at address i
 // display these rows XOR'd with what's on screen now starting at (start_x, start_y)
 // set v[0xF] to 1 if this erases any pixels on screen, else 0
-// TODO: rewrite only the area affected by the sprite
-void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {
+// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
+void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {	
+	// zero out the flags register
 	v[0xF] = 0;
+	
+	// iterate through rows
 	for (int r = 0; r < num_rows; r++) {
-		uint8_t curr_row = reverse_table[mem[i + r]];
-		for (int c = 0; c < 8; c++) {
-			bool screen_pixel = screen[y_coord + r] [x_coord + c];
-			bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
-			
-			// logic to check if pixel is erased and whether to update v[0xF]
-			if (v[0xF] == 0 && screen_pixel == true && row_pixel == true) {
-				v[0xF] = 1;
+		if (y_coord + r < 32) {	// logic to check we're not drawing out of bounds vertically
+			// for some reason bytes are stored in reverse bit order, so reverse the bits
+			uint8_t curr_row = reverse_table[mem[i + r]];
+			// iterate through columns
+			for (int c = 0; c < 8; c++) {
+				if (x_coord + c < 64) {	// logic to check we're not drawing out of bounds horizontally
+					bool screen_pixel = screen[y_coord + r] [x_coord + c];
+					bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
+					
+					// update pixel erasure flag
+					v[0xF] = (screen_pixel && row_pixel) ? 1 : v[0xF];
+					
+					// xor the current pixel onto the screen
+					screen[(y_coord + r)] [(x_coord + c)] = screen_pixel ^ row_pixel;
+				}
 			}
-			
-			screen[y_coord + r] [x_coord + c] = screen_pixel ^ row_pixel;
 		}
 	}
+}
 
-	if (debug) {
-		printf("printing %d rows starting at (%d, %d):\n", num_rows, x_coord, y_coord);
-		for (int r = 0; r < 32; r++) {
-			for (int c = 0; c < 64; c++) {
-				printf("%c", screen[r][c] ? '*' : ' ');
+// turns the bool array in screen[][] to rectangles to be rendered in the window
+void update_draw_buffer() {
+	// make a rectangle at every pixel in screen[][] (set color as needed) then send it to the renderer
+	for (int r = 0; r < 32; r++) {
+		for (int c = 0; c < 64; c++) {
+			if (screen[r][c]) {
+				// set draw color to foreground color
+				SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+			} else {
+				// set draw color to background color
+				SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);	
 			}
-			printf("\n");
+			
+			SDL_FRect pixel = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
+			SDL_RenderFillRect(renderer, &pixel);
 		}
-		printf("\n");
 	}
+}
 
-	update_draw_buffer();
-	SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+void wait_for_key() {
+	// this is the key we'll put inside the given register.
+	uint8_t key = 0xFF;
+	
+	// loop through the keypad, and save the first key to be pressed
+	for (int a = 0; a < 0x10; a++) {
+		if (keypad[a]) {
+			key = a;
+		}
+	}
+	
+	// while that key is pressed down, decrement timers and handle input
+	while (keypad[key]) {
+		SDL_Delay(16.67f);
+		decrement_timers();
+		handle_input();
+	}
+	
+	// loop this instruction while we have not pressed a key yet
+	pc -= (key == 0xFF) ? 2 : 0;
 }
 
 // EXECUTE STAGE
 // executes an instruction
-// TODO: reduce overlapping code with print_instruction
 void execute_instruction() {
 	switch (first){
 		case 0x0:
 			switch (last_2) {
 				case 0xE0:	// clear screen
-					clear_screen(renderer);
-					draw_flag = true;
+					clear_screen();
 					break;
 				case 0xEE:	// return
 					if (stack_addr > -1) {
@@ -438,9 +559,7 @@ void execute_instruction() {
 		case 0x5:	// skip-equals register
 			switch (fourth) {
 				case 0x0:
-					if (v[second] == v[third]) {
-						pc += 2;
-					}
+					pc += (v[second] == v[third]) ? 2 : 0;
 					break;
 				default:
 					SDL_Log("undefined - 5");
@@ -458,43 +577,48 @@ void execute_instruction() {
 					v[second] = v[third];
 					break;
 				case 0x1:	// or
-					v[second] = v[second] | v[third];
+					v[second] |= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x2:	// and
-					v[second] = v[second] & v[third];
+					v[second] &= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x3:	// xor
-					v[second] = v[second] ^ v[third];
+					v[second] ^= v[third];
+					v[0xF] = 0;
 					break;
 				case 0x4:	// add with carry flag in vF
 					uint16_t sum = v[second] + v[third];
-					v[0xF] = (sum > 0xFF) ? 1 : 0;
 					v[second] = (uint8_t) sum;
+					v[0xF] = (sum > 0xFF) ? 1 : 0;
 					break;
-				case 0x5:	// subtract with borrow flag in vF
-					v[0xF] = (v[second] > v[third]) ? 1 : 0;
-					v[second] = v[second] - v[third];
+				case 0x5:	// subtract with !(borrow) flag in vF
+					bool borrow_5 = v[second] < v[third];
+					v[second] -= v[third];
+					v[0xF] = !borrow_5 ? 1 : 0;
 					break;				
 				case 0x6:	// shift right with half flag in vF
-					v[0xF] = ((v[second] & 0x01) == 1) ? 1 : 0;
-					v[second] = v[second] >> 1;
+					bool half_6 = ((v[third] & 0x01) == 1);
+					v[second] = v[third] >> 1;
+					v[0xF] = half_6 ? 1 : 0;
 					break;
-				case 0x7:	// negated subtraction with borrow flag in vF
-					v[0xF] = (v[third] > v[second]) ? 1 : 0;
+				case 0x7:	// negated subtraction with !(borrow) flag in vF
+					bool borrow_7 = v[third] < v[second];
 					v[second] = v[third] - v[second];
+					v[0xF] = !borrow_7 ? 1 : 0;
 					break;
 				case 0xE:	// shift left with overflow flag in vF
-					v[0xF] = ((v[second] & 0x80) == 0x80) ? 1 : 0;
-					v[second] = v[second] << 1;					
+					bool overflow_e = ((v[third] & 0x80) == 0x80);
+					v[second] = v[third] << 1;
+					v[0xF] = overflow_e ? 1 : 0;
 					break;
 				default:
 					SDL_Log("undefined - 8");
 			}
 			break;
 		case 0x9:	// skip-not-equals register
-			if (v[second] != v[third]) {
-				pc += 2;
-			}
+			pc += (v[second] != v[third]) ? 2 : 0;
 			break;
 		case 0xA:	// load to index
 			i = last_3;
@@ -503,20 +627,20 @@ void execute_instruction() {
 			pc = v[0] + last_3;
 			break;
 		case 0xC:	// vx and random byte
-			SDL_Log("RND v%x, 0x%x", second, last_2);
 			v[second] = (uint8_t) (rand() % 256) & last_2;
 			break;
-		case 0xD:
+		case 0xD:	// draw instruction
 			draw_instr(v[second] % 64, v[third] % 32, fourth);
-			draw_flag = true;
 			break;
-		case 0xE:
+		case 0xE:	// key press instructions
+		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
+		// do to pc what must be done
 			switch (last_2) {
-				case 0x9E:
-					SDL_Log("SKP v%x", second);
+				case 0x9E:	// skip next if key pressed
+					pc += keypad[v[second]] ? 2 : 0;
 					break;
-				case 0xA1:
-					SDL_Log("SKNP v%x", second);
+				case 0xA1:	// skip next if key isn't pressed
+					pc += keypad[v[second]] ? 0 : 2;
 					break;
 				default:
 					SDL_Log("undefined - e");
@@ -524,32 +648,42 @@ void execute_instruction() {
 			break;
 		case 0xF:
 			switch (last_2) {
-				case 0x07:
-					SDL_Log("LD v%x, DT", second);
+				case 0x07:	// load delay register
+					v[second] = delay;
 					break;
-				case 0x0A:
-					SDL_Log("LD v%x, K", second);
+				case 0x0A:	// wait until key press, then store key in v[second]
+					wait_for_key();	
 					break;
-				case 0x15:
-					SDL_Log("LD DT, v%x", second);
+				case 0x15:	// set delay timer to v[second]
+					delay = v[second];
 					break;					
-				case 0x18:
-					SDL_Log("LD ST, v%x", second);
+				case 0x18:	// set sound timer to v[second]
+					sound = v[second];
 					break;
-				case 0x1E:
-					SDL_Log("ADD i, v%x", second);
+				case 0x1E:	// add v[second] to memory index
+					i += v[second];
+					v[0xF] = i > 0xFFF ? 1 : 0;
 					break;
-				case 0x29:
-					SDL_Log("LD F, v%x", second);
+				case 0x29:	// set index to point to character in fonts corresponding to bottom nibble of v[second]
+					//	(bottom nibble)		(number of bytes per character in fontset)
+					i = (v[second] & 0x0F) * 5;
 					break;
-				case 0x33:
-					SDL_Log("LD B, v%x", second);
+				case 0x33:	// convert v[second] to decimal, then store each digit in successive memory indices
+					mem[i] 	   = v[second] / 100 % 10;
+					mem[i + 1] = v[second] / 10  % 10;
+					mem[i + 2] = v[second] /*/1*/% 10;
 					break;
-				case 0x55:
-					SDL_Log("LD [i], v%x", second);
+				case 0x55:	// store registers to memory, then increment mem index accordingly
+					for (int a = 0; a <= second; a++) {
+						mem[i + a] = v[a];
+					}
+					i += second + 1;					
 					break;
-				case 0x65:
-					SDL_Log("LD v%x, [i]", second);
+				case 0x65:	// pull memory to registers, then increment mem index accordingly
+					for (int a = 0; a <= second; a++) {
+						v[a] = mem[i + a];
+					}
+					i += second + 1;
 					break;
 				default:
 					SDL_Log("undefined - f");
@@ -560,52 +694,10 @@ void execute_instruction() {
 	}
 }
 
-// INPUT HANDLING
-// handle all input to the emulator
-bool handle_input() {
-	SDL_Event event;
-	SDL_zero(event);
-	
-	while (SDL_PollEvent(&event)) {
-		switch (event.type) {
-			case SDL_EVENT_QUIT:
-				return false;
-			default:
-				return true;
-		}			
-	}
-	
-	return true;
-}
-
 // emulation goes HERE!
 int main(int argc, char** argv) {
-	// argv -> ['chip-8.exe', rom name, debug, scale, foreground color, background color]
-	if (argc > 2 && argc != 6) {
-		SDL_Log("usage:   ./chip-8.exe  [rom location]    [debug] [scale factor] [foreground color] [background color]");
-		SDL_Log("default: ./chip-8.exe roms/ibm_logo.ch8   false        10            FFFFFFFF           000000FF");
-		SDL_Log("takes:   ./chip-8.exe     string          bool      integer       32-bit integer     32-bit integer");
-		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
-		
-		return -1;
-	} else if (argc == 6){
-		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);
-		debug	 = strcmp("true", argv[2]) == 0 ? true : false;
-		
-		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
-		uint32_t pre_bg = strtoll(argv[5], NULL, 16);
-		
-		printf("fg: %s, bg: %s\npre_fg: %x, pre_bg: %x\n\n", argv[4], argv[5], pre_fg, pre_bg);
-		
-		fg_color = (struct color) {(pre_fg & 0xFF000000) >> 24, (pre_fg & 0x00FF0000) >> 16, (pre_fg & 0x0000FF00) >> 8, pre_fg & 0x000000FF};
-		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
-	} else {
-		SCALE = 10;
-		debug = false;
-		
-		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
-		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
-	}
+	// read the user config and use it
+	set_config(argc, argv);
 	
 	// set seed for random number gen
 	srand(time(NULL));
@@ -619,32 +711,33 @@ int main(int argc, char** argv) {
 	}
 	
 	// initialize necessary subsystems, create the window and renderer
-	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) || !SDL_CreateWindowAndRenderer("chip-8 emulator :D", 64 * SCALE, 32 * SCALE, 0, &window, &renderer)) {
+	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) || !SDL_CreateWindowAndRenderer("my chip-8 :D", 64 * SCALE, 32 * SCALE, 0, &window, &renderer)) {
 		SDL_Log("failed to initialize: %s\n", SDL_GetError());
 		return -1;
 	}
-	
-	// tells us where the window/renderer have been initialized in memory
-	SDL_Log("window location:   %p\nrenderer location: %p\n\n", window, renderer);
 	
 	// if window and renderer and texture are created and file is valid, then the emulator can run
 	running = true;
 	
 	// clear screen before beginning, then set draw flag to true
-	clear_screen(renderer);
+	clear_screen();
+	update_draw_buffer();
 	SDL_RenderPresent(renderer);
 	
-	// initialize values relevant to the screen update timer
+	// initialize values to help with screen updates
 	uint64_t time_a;
 	uint64_t time_diff;
 	uint64_t time_freq = SDL_GetPerformanceFrequency();
 	
 	// main emulation loop
-	while (running) {		
+	while (running) {
 		//fetch
 		instr = mem[pc] << 8 | mem[pc + 1];
+
+		// increment pc since we already have current instruction
 		pc += 2;
 		
+		// execute!
 		// mask the digits we need in the opcode
 		first  = (instr & 0xF000) >> 12;
 		second = (instr & 0x0F00) >> 8;
@@ -652,12 +745,6 @@ int main(int argc, char** argv) {
 		fourth = (instr & 0X000F);
 		last_2 = (instr & 0x00FF);
 		last_3 = (instr & 0x0FFF);
-		
-		// decode instruction
-		if (debug) {
-			printf("0x%x: %4x | ", pc, instr);
-			print_instruction();	
-		}
 		
 		// get elapsed time before executing an instruction
 		time_a = SDL_GetPerformanceCounter();
@@ -671,24 +758,24 @@ int main(int argc, char** argv) {
 		// if it was a draw instruction i saw, then wait for the beginning of the next frame
 		// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
 		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
+		// TODO: fix timer decrementing
 		if (instr == 0x00E0 || first == 0xD) {
 			SDL_Delay(16.67f - time_diff);
-		}
-
-		// draw only if the draw flag was asserted - might remove this later depending on how i call draw methods
-		if (draw_flag) {
-			// actually draw - do this here to eliminate flickering
+			update_draw_buffer();
 			SDL_RenderPresent(renderer);
 			
-			draw_flag = false;
+			// decrement delay and sound timers
+			// this is super janky but i expect at least one draw command every 1/60 sec
+			// so should be fine?
+			decrement_timers();
 		}
 		
 		// handle the input and update running accordingly
-		running = handle_input();
+		running = (handle_input());
 	}
 	
 	// clean up
-	end(window, renderer);
+	end();
 	
 	// end
 	return 0;
