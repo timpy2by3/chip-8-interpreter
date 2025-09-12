@@ -1,5 +1,3 @@
-// TODO: more elegant way of showing/hiding debug output
-
 // C LIBRARIES
 #include <time.h>
 #include <stdio.h>
@@ -208,6 +206,12 @@ bool open_file(char* name) {
 	return true;
 }
 
+// decrements both timers
+void decrement_timers() {
+	delay -= delay > 0 ? 1 : 0;
+	sound -= sound > 0 ? 1 : 0;
+}
+
 // clean up all of the sdl tools and arrays that have been made
 void end() {
 	SDL_DestroyWindow(window);
@@ -221,7 +225,7 @@ void end() {
 	SDL_Quit();
 }
 
-// DECODE STAGE
+// DECODE STAGE - disassembler
 // turns the binary code to human-readable assembly
 void print_instruction() {	
 	switch (first){
@@ -362,66 +366,6 @@ void print_instruction() {
 	}
 }
 
-// HELPER FUNCTIONS FOR EXECUTION
-// slay all.
-void clear_screen() {
-	// set all values in screen[][] to false
-	for (int r = 0; r < 32; r++) {
-		for (int c = 0; c < 64; c++) {
-			screen[r][c] = false;
-		}
-	}
-}
-
-// reads num_rows bytes from memory, starting at address i
-// display these rows XOR'd with what's on screen now starting at (start_x, start_y)
-// set v[0xF] to 1 if this erases any pixels on screen, else 0
-// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
-void draw_instr(uint8_t x_in, uint8_t y_in, uint8_t num_rows) {
-	uint8_t x_coord = x_in % 64;
-	uint8_t y_coord = y_in % 32;
-	
-	// iterate through rows
-	for (int r = 0; r < num_rows; r++) {
-		if (r < 32) {	// logic to check we're not drawing out of bounds vertically
-			// for some reason bytes are stored in reverse bit order, so reverse the bits
-			uint8_t curr_row = reverse_table[mem[i + r]];
-			// iterate through columns
-			for (int c = 0; c < 8; c++) {
-				if (c < 64) {	// logic to check we're not drawing out of bounds horizontally
-					bool screen_pixel = screen[y_coord + r] [x_coord + c];
-					bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
-					
-					// update pixel erasure flag
-					v[0xF] = (screen_pixel && row_pixel) ? 1 : 0;
-					
-					// xor the current pixel onto the screen
-					screen[(y_coord + r)] [(x_coord + c)] = screen_pixel ^ row_pixel;
-				}
-			}
-		}
-	}
-}
-
-// turns the bool array in screen[][] to rectangles to be rendered in the window
-void update_draw_buffer() {
-	// make a rectangle at every pixel in screen[][] (set color as needed) then send it to the renderer
-	for (int r = 0; r < 32; r++) {
-		for (int c = 0; c < 64; c++) {
-			if (screen[r][c]) {
-				// set draw color to foreground color
-				SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
-			} else {
-				// set draw color to background color
-				SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);	
-			}
-			
-			SDL_FRect pixel = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
-			SDL_RenderFillRect(renderer, &pixel);
-		}
-	}
-}
-
 // INPUT HANDLING
 // handle all input to the emulator
 // TODO: more elegant way of setting key values (although not really necessary; this is probably the fastest implementation)
@@ -486,6 +430,88 @@ bool handle_input() {
 	return true;
 }
 
+// HELPER FUNCTIONS FOR EXECUTION
+// slay all.
+void clear_screen() {
+	// set all values in screen[][] to false
+	for (int r = 0; r < 32; r++) {
+		for (int c = 0; c < 64; c++) {
+			screen[r][c] = false;
+		}
+	}
+}
+
+// reads num_rows bytes from memory, starting at address i
+// display these rows XOR'd with what's on screen now starting at (start_x, start_y)
+// set v[0xF] to 1 if this erases any pixels on screen, else 0
+// TODO: rewrite only the area affected by the sprite (do in update_draw_buffer())
+void draw_instr(uint8_t x_coord, uint8_t y_coord, uint8_t num_rows) {	
+	// zero out the flags register
+	v[0xF] = 0;
+	
+	// iterate through rows
+	for (int r = 0; r < num_rows; r++) {
+		if (y_coord + r < 32) {	// logic to check we're not drawing out of bounds vertically
+			// for some reason bytes are stored in reverse bit order, so reverse the bits
+			uint8_t curr_row = reverse_table[mem[i + r]];
+			// iterate through columns
+			for (int c = 0; c < 8; c++) {
+				if (x_coord + c < 64) {	// logic to check we're not drawing out of bounds horizontally
+					bool screen_pixel = screen[y_coord + r] [x_coord + c];
+					bool row_pixel	  = (curr_row & (1 << c)) > 0 ? true : false;
+					
+					// update pixel erasure flag
+					v[0xF] = (screen_pixel && row_pixel) ? 1 : v[0xF];
+					
+					// xor the current pixel onto the screen
+					screen[(y_coord + r)] [(x_coord + c)] = screen_pixel ^ row_pixel;
+				}
+			}
+		}
+	}
+}
+
+// turns the bool array in screen[][] to rectangles to be rendered in the window
+void update_draw_buffer() {
+	// make a rectangle at every pixel in screen[][] (set color as needed) then send it to the renderer
+	for (int r = 0; r < 32; r++) {
+		for (int c = 0; c < 64; c++) {
+			if (screen[r][c]) {
+				// set draw color to foreground color
+				SDL_SetRenderDrawColor(renderer, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+			} else {
+				// set draw color to background color
+				SDL_SetRenderDrawColor(renderer, bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha);	
+			}
+			
+			SDL_FRect pixel = {.x = c * SCALE, .y = r * SCALE, .w = SCALE, .h = SCALE};
+			SDL_RenderFillRect(renderer, &pixel);
+		}
+	}
+}
+
+void wait_for_key() {
+	// this is the key we'll put inside the given register.
+	uint8_t key = 0xFF;
+	
+	// loop through the keypad, and save the first key to be pressed
+	for (int a = 0; a < 0x10; a++) {
+		if (keypad[a]) {
+			key = a;
+		}
+	}
+	
+	// while that key is pressed down, decrement timers and handle input
+	while (keypad[key]) {
+		SDL_Delay(16.67f);
+		decrement_timers();
+		handle_input();
+	}
+	
+	// loop this instruction while we have not pressed a key yet
+	pc -= (key == 0xFF) ? 2 : 0;
+}
+
 // EXECUTE STAGE
 // executes an instruction
 void execute_instruction() {
@@ -533,9 +559,7 @@ void execute_instruction() {
 		case 0x5:	// skip-equals register
 			switch (fourth) {
 				case 0x0:
-					if (v[second] == v[third]) {
-						pc += 2;
-					}
+					pc += (v[second] == v[third]) ? 2 : 0;
 					break;
 				default:
 					SDL_Log("undefined - 5");
@@ -594,9 +618,7 @@ void execute_instruction() {
 			}
 			break;
 		case 0x9:	// skip-not-equals register
-			if (v[second] != v[third]) {
-				pc += 2;
-			}
+			pc += (v[second] != v[third]) ? 2 : 0;
 			break;
 		case 0xA:	// load to index
 			i = last_3;
@@ -608,7 +630,7 @@ void execute_instruction() {
 			v[second] = (uint8_t) (rand() % 256) & last_2;
 			break;
 		case 0xD:	// draw instruction
-			draw_instr(v[second], v[third], fourth);
+			draw_instr(v[second] % 64, v[third] % 32, fourth);
 			break;
 		case 0xE:	// key press instructions
 		// if v[second] is in [0x0, 0xF] and handle_input()'s return matches the key corresponding to v[second]'s value
@@ -630,17 +652,7 @@ void execute_instruction() {
 					v[second] = delay;
 					break;
 				case 0x0A:	// wait until key press, then store key in v[second]
-					// this is the key we'll put inside the given register.
-					uint8_t key = 0xFF;
-					
-					for (int a = 0; a < 0x10; a++) {
-						if (keypad[a]) {
-							key = a;
-						}
-					}
-					
-					pc -= (key == 0xFF) ? 2 : 0;
-					
+					wait_for_key();	
 					break;
 				case 0x15:	// set delay timer to v[second]
 					delay = v[second];
@@ -699,7 +711,7 @@ int main(int argc, char** argv) {
 	}
 	
 	// initialize necessary subsystems, create the window and renderer
-	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) || !SDL_CreateWindowAndRenderer("chip-8 emulator :D", 64 * SCALE, 32 * SCALE, 0, &window, &renderer)) {
+	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) || !SDL_CreateWindowAndRenderer("my chip-8 :D", 64 * SCALE, 32 * SCALE, 0, &window, &renderer)) {
 		SDL_Log("failed to initialize: %s\n", SDL_GetError());
 		return -1;
 	}
@@ -746,6 +758,7 @@ int main(int argc, char** argv) {
 		// if it was a draw instruction i saw, then wait for the beginning of the next frame
 		// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
 		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
+		// TODO: fix timer decrementing
 		if (instr == 0x00E0 || first == 0xD) {
 			SDL_Delay(16.67f - time_diff);
 			update_draw_buffer();
@@ -754,8 +767,7 @@ int main(int argc, char** argv) {
 			// decrement delay and sound timers
 			// this is super janky but i expect at least one draw command every 1/60 sec
 			// so should be fine?
-			delay -= delay > 0 ? 1 : 0;
-			sound -= sound > 0 ? 1 : 0;
+			decrement_timers();
 		}
 		
 		// handle the input and update running accordingly
