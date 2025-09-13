@@ -729,13 +729,17 @@ int main(int argc, char** argv) {
 	uint64_t time_diff;
 	uint64_t time_freq = SDL_GetPerformanceFrequency();
 	
+	// used for timing timer decrements
+	uint16_t loop_count;
+	
 	// main emulation loop
 	while (running) {
 		//fetch
 		instr = mem[pc] << 8 | mem[pc + 1];
 
-		// increment pc since we already have current instruction
+		// increment pc and loop_count since we already have current instruction
 		pc += 2;
+		loop_count++;
 		
 		// execute!
 		// mask the digits we need in the opcode
@@ -752,8 +756,15 @@ int main(int argc, char** argv) {
 		// execute
 		execute_instruction();
 		
+		// decrement timers on the correct loop
+		// this should be config-able
+		if (loop_count == 0x3333) {
+			loop_count = 0; 
+			decrement_timers();
+		}
+		
 		// get time it took to execute the instruction
-		time_diff = (((double) SDL_GetPerformanceCounter() - (double) time_a) * 1000) / ((double) time_freq);
+		time_diff = (((double) SDL_GetPerformanceCounter() - (double) time_a) * 1000) / ((double) time_freq);		
 		
 		// if it was a draw instruction i saw, then wait for the beginning of the next frame
 		// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
@@ -763,11 +774,6 @@ int main(int argc, char** argv) {
 			SDL_Delay(16.67f - time_diff);
 			update_draw_buffer();
 			SDL_RenderPresent(renderer);
-			
-			// decrement delay and sound timers
-			// this is super janky but i expect at least one draw command every 1/60 sec
-			// so should be fine?
-			decrement_timers();
 		}
 		
 		// handle the input and update running accordingly
