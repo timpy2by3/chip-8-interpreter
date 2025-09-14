@@ -509,7 +509,11 @@ void wait_for_key() {
 	}
 	
 	// loop this instruction while we have not pressed a key yet
-	pc -= (key == 0xFF) ? 2 : 0;
+	if (key == 0xFF) {
+		pc -= 2;
+	} else {
+		v[second] = key;
+	} 
 }
 
 // EXECUTE STAGE
