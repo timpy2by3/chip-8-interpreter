@@ -83,8 +83,9 @@
 	bool running = false;
 
 // sdl tools
-	SDL_Window*   window   = NULL;
-	SDL_Renderer* renderer = NULL;
+	SDL_Window*   	  window	= NULL;
+	SDL_Renderer* 	  renderer	= NULL;
+	SDL_AudioStream*  stream	= NULL;
 
 // array for display
 	bool screen[32][64];	// each pixel's value
@@ -216,9 +217,11 @@ void decrement_timers() {
 void end() {
 	SDL_DestroyWindow(window);
 	SDL_DestroyRenderer(renderer);
+	SDL_DestroyAudioStream(stream);
 	
 	window = NULL;
 	renderer = NULL;
+	stream = NULL;
 	
 	SDL_QuitSubSystem(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
 	
@@ -774,6 +777,7 @@ int main(int argc, char** argv) {
 			SDL_Delay(16.67f - time_diff);
 			update_draw_buffer();
 			SDL_RenderPresent(renderer);
+			loop_count = 0;
 		}
 		
 		// handle the input and update running accordingly
