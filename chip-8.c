@@ -76,7 +76,7 @@
 	struct color bg_color;
 	
 	uint8_t    SCALE;
-	bool   	   debug;
+	bool   	   DEBUG;
 
 // emulator state
 // TODO: make into an enum and handle pausing
@@ -134,7 +134,7 @@ void set_config(int argc, char** argv) {
 		SDL_Log("color format: 0x[red][green][blue][alpha]\n	> each value is 1 byte\n	> as alpha increases, so does the opacity");
 	} else if (argc == 6){
 		SCALE	 = (uint8_t) strtol(argv[3], NULL, 10);			// parse an integer scale value
-		debug	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
+		DEBUG	 = strcmp("true", argv[2]) == 0 ? true : false;	// if 'true' is written in args, set debug flag to true
 		
 		// parse a long long int from the foreground, background colors' args
 		uint32_t pre_fg = strtoll(argv[4], NULL, 16);
@@ -145,7 +145,7 @@ void set_config(int argc, char** argv) {
 		bg_color = (struct color) {(pre_bg & 0xFF000000) >> 24, (pre_bg & 0x00FF0000) >> 16, (pre_bg & 0x0000FF00) >> 8, pre_bg & 0x000000FF};
 	} else {	// default values
 		SCALE = 10;
-		debug = false;
+		DEBUG = false;
 		
 		fg_color = (struct color) {0xFF, 0xFF, 0xFF, 0xFF};
 		bg_color = (struct color) {0x00, 0x00, 0x00, 0xFF};
@@ -205,6 +205,24 @@ bool open_file(char* name) {
 	fclose(rom);
 	
 	return true;
+}
+
+// fetches an instruction
+void fetch() {
+	//fetch
+	instr = mem[pc] << 8 | mem[pc + 1];
+
+	// increment pc since we already have current instruction
+	pc += 2;
+	
+	// execute!
+	// mask the digits we need in the opcode
+	first  = (instr & 0xF000) >> 12;
+	second = (instr & 0x0F00) >> 8;
+	third  = (instr & 0X00F0) >> 4;
+	fourth = (instr & 0X000F);
+	last_2 = (instr & 0x00FF);
+	last_3 = (instr & 0x0FFF);
 }
 
 // decrements both timers
@@ -735,53 +753,50 @@ int main(int argc, char** argv) {
 	// used for timing timer decrements
 	uint16_t loop_count;
 	
-	// main emulation loop
-	while (running) {
-		//fetch
-		instr = mem[pc] << 8 | mem[pc + 1];
-
-		// increment pc and loop_count since we already have current instruction
-		pc += 2;
-		loop_count++;
-		
-		// execute!
-		// mask the digits we need in the opcode
-		first  = (instr & 0xF000) >> 12;
-		second = (instr & 0x0F00) >> 8;
-		third  = (instr & 0X00F0) >> 4;
-		fourth = (instr & 0X000F);
-		last_2 = (instr & 0x00FF);
-		last_3 = (instr & 0x0FFF);
-		
-		// get elapsed time before executing an instruction
-		time_a = SDL_GetPerformanceCounter();
-		
-		// execute
-		execute_instruction();
-		
-		// decrement timers on the correct loop
-		// this should be config-able
-		if (loop_count == 0x3333) {
-			loop_count = 0; 
-			decrement_timers();
+	if (DEBUG) {
+		while (pc < 0x200 + size) {
+			fetch();
+			printf("0x%04x: %04x | ", pc, instr);
+			print_instruction();
 		}
-		
-		// get time it took to execute the instruction
-		time_diff = (((double) SDL_GetPerformanceCounter() - (double) time_a) * 1000) / ((double) time_freq);		
-		
-		// if it was a draw instruction i saw, then wait for the beginning of the next frame
-		// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
-		// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
-		// TODO: fix timer decrementing
-		if (instr == 0x00E0 || first == 0xD) {
-			SDL_Delay(16.67f - time_diff);
-			update_draw_buffer();
-			SDL_RenderPresent(renderer);
-			loop_count = 0;
+	} else {
+		// main emulation loop
+		while (running) {
+			fetch();
+			
+			// increment loop_count to track how many instructions have passed
+			loop_count++;
+			
+			// get elapsed time before executing an instruction
+			time_a = SDL_GetPerformanceCounter();
+			
+			// execute
+			execute_instruction();
+			
+			// decrement timers on the correct loop
+			// this should be config-able
+			if (loop_count == 0x3333) {
+				loop_count = 0; 
+				decrement_timers();
+			}
+			
+			// get time it took to execute the instruction
+			time_diff = (((double) SDL_GetPerformanceCounter() - (double) time_a) * 1000) / ((double) time_freq);		
+			
+			// if it was a draw instruction i saw, then wait for the beginning of the next frame
+			// delay to get 60 hz refresh rate (my display is 48 hz though ):) 
+			// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
+			// TODO: fix timer decrementing
+			if (instr == 0x00E0 || first == 0xD) {
+				SDL_Delay(16.67f - time_diff);
+				update_draw_buffer();
+				SDL_RenderPresent(renderer);
+				loop_count = 0;
+			}
+			
+			// handle the input and update running accordingly
+			running = (handle_input());
 		}
-		
-		// handle the input and update running accordingly
-		running = (handle_input());
 	}
 	
 	// clean up
