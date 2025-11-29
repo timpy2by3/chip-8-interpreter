@@ -1,4 +1,5 @@
 // C LIBRARIES
+#include <math.h>
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,7 +86,10 @@
 // sdl tools
 	SDL_Window*   	  window	= NULL;
 	SDL_Renderer* 	  renderer	= NULL;
+	
+	// audio tools
 	SDL_AudioStream*  stream	= NULL;
+	SDL_AudioDeviceID audio_id  = -1;
 
 // array for display
 	bool screen[32][64];	// each pixel's value
@@ -511,6 +515,7 @@ void update_draw_buffer() {
 	}
 }
 
+// waits for a key press, then puts the key press in a specified register
 void wait_for_key() {
 	// this is the key we'll put inside the given register.
 	uint8_t key = 0xFF;
@@ -792,6 +797,7 @@ int main(int argc, char** argv) {
 			// by delaying at most 1000 ms/sec * 1 sec/60 frames = 16.67 ms/frame
 			// TODO: fix timer decrementing
 			if (instr == 0x00E0 || first == 0xD) {
+				//fix this after tuesday
 				SDL_Delay(16.67f - time_diff);
 				update_draw_buffer();
 				SDL_RenderPresent(renderer);
